@@ -6,6 +6,7 @@ import os
 import json
 import time
 import socket
+import platform
 from typing import Set, Dict, Tuple, List, Any
 from rich.console import Console
 from rich.table import Table
@@ -197,6 +198,9 @@ def get_update_status() -> Tuple[str, bool]:
         return "[dim]Unknown[/dim]", reboot
 
 
+import platform
+
+
 def render_dashboard():
     # 1. Header & Timing Info
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -235,7 +239,9 @@ def render_dashboard():
         "DISK", create_bar(disk.percent), f"{disk.free // 1024**3} GB Free"
     )
 
-    # 3. Middle Section: Host Info (with requested blank rows)
+    # 3. Middle Section: Kernel & Host Info (with blank rows)
+    # Using platform.release() for the kernel version
+    kernel_text = Text(f"Kernel: {platform.release()}", style="bold cyan")
     host_text = Text(get_host_info(), style="bold yellow")
 
     # 4. Lower Diagnostic Grid (Processes | Health)
@@ -286,9 +292,10 @@ def render_dashboard():
         show_header=False, box=None, padding=0, width=DASHBOARD_WIDTH - 4
     )
     main_container.add_row(stats_table)
-    main_container.add_row("")  # Blank row before Host Info
-    main_container.add_row(host_text)  # Host: KVM/QEMU...
-    main_container.add_row("")  # Blank row after Host Info
+    main_container.add_row("")  # Blank row
+    main_container.add_row(kernel_text)  # Kernel version
+    main_container.add_row(host_text)  # Host info (Vendor + Product)
+    main_container.add_row("")  # Blank row
     main_container.add_row(lower_grid)
 
     # 6. Final Footer Logic
