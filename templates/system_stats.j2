@@ -1,0 +1,322 @@
+#!/usr/bin/env python3
+import psutil
+import datetime
+import subprocess
+import os
+import json
+import time
+import socket
+from typing import Set, Dict, Tuple, List, Any
+from rich.console import Console
+from rich.table import Table
+from rich.progress import Progress, BarColumn, TextColumn
+from rich.panel import Panel
+from rich.text import Text
+
+# Fixed width for consistent look on all screens
+DASHBOARD_WIDTH = {{system_dashboard_width}}
+console = Console(width=DASHBOARD_WIDTH)
+
+
+def create_bar(value: float):
+    color = "green" if value < 60 else "yellow" if value < 85 else "red"
+    prog = Progress(
+        BarColumn(bar_width=20, complete_style=color),
+        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+        console=console,
+    )
+    _ = prog.add_task("", total=100, completed=int(value))
+    return prog
+
+
+def get_ip_address() -> str:
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return str(ip)
+    except Exception:
+        return "127.0.0.1"
+
+
+def get_host_info() -> str:
+    """Retrieves system manufacturer and product name from sysfs."""
+    try:
+        vendor = ""
+        product = ""
+        if os.path.exists("/sys/class/dmi/id/sys_vendor"):
+            with open("/sys/class/dmi/id/sys_vendor", "r") as f:
+                vendor = f.read().strip()
+        if os.path.exists("/sys/class/dmi/id/product_name"):
+            with open("/sys/class/dmi/id/product_name", "r") as f:
+                product = f.read().strip()
+
+        if vendor or product:
+            return f"Host: {vendor} {product}".strip()
+        return "Host: Unknown"
+    except Exception:
+        return "Host: [dim]Access Denied[/dim]"
+
+
+def get_top_processes(count: int = 5) -> List[Dict[str, Any]]:
+    for p in psutil.process_iter(["cpu_percent"]):
+        try:
+            _ = p.cpu_percent()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    time.sleep(1.0)
+    procs: List[Dict[str, Any]] = []
+    for p in psutil.process_iter(["pid", "name", "cpu_percent"]):
+        try:
+            cpu = p.info["cpu_percent"] or 0.0
+            if cpu > 0 or (p.info["pid"] or 0) > 100:
+                procs.append(p.info)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return sorted(procs, key=lambda x: x["cpu_percent"] or 0.0, reverse=True)[:count]
+
+
+def get_failed_services() -> str:
+    """Checks for failed systemd units."""
+    try:
+        output = (
+            subprocess.check_output(
+                ["systemctl", "--failed", "--property=Id", "--no-legend"],
+                stderr=subprocess.DEVNULL,
+            )
+            .decode()
+            .strip()
+        )
+        count = len([line for line in output.split("\n") if line.strip()])
+        return f"[red]{count} FAILED[/red]" if count > 0 else "[green]Healthy[/green]"
+    except Exception:
+        return "[dim]Unknown[/dim]"
+
+
+def get_docker_stats() -> str:
+    socket_path = "/var/run/docker.sock"
+    if not os.path.exists(socket_path):
+        return "[dim]Not Installed[/dim]"
+    try:
+        cmd = [
+            "curl",
+            "--unix-socket",
+            socket_path,
+            "-s",
+            "http://localhost/containers/json?all=1",
+        ]
+        output = subprocess.check_output(cmd, stderr=subprocess.DEVNULL).decode()
+        containers = json.loads(output)
+        running = sum(1 for c in containers if c.get("State") == "running")
+        total = len(containers)
+        if total == 0:
+            return "[green]0 containers[/green]"
+        color = "green" if running == total else "yellow"
+        return f"[{color}]{running}/{total} active[/{color}]"
+    except Exception:
+        return "[dim]Stopped[/dim]"
+
+
+def get_health_metrics() -> Dict[str, str]:
+    metrics = {}
+    try:
+        raw_boot = (
+            subprocess.check_output(
+                "journalctl -b -p err --quiet 2>/dev/null | wc -l", shell=True
+            )
+            .decode()
+            .strip()
+        )
+        metrics["boot"] = (
+            f"[red]{raw_boot}[/red]" if int(raw_boot or 0) > 0 else "[green]0[/green]"
+        )
+    except Exception:
+        metrics["boot"] = "[dim]Access Denied[/dim]"
+    try:
+        process = subprocess.run("dmesg", capture_output=True, text=True, shell=True)
+        if process.returncode != 0:
+            metrics["kernel"] = "[dim]No Access[/dim]"
+        else:
+            crit = ["hardware error", "i/o error", "out of memory", "kill"]
+            count = sum(
+                1
+                for line in process.stdout.splitlines()
+                if any(k in line.lower() for k in crit)
+            )
+            metrics["kernel"] = (
+                f"[bold red]{count} ERR[/bold red]"
+                if count > 0
+                else "[green]Healthy[/green]"
+            )
+    except Exception:
+        metrics["kernel"] = "[dim]N/A[/dim]"
+    try:
+        if os.access("/var/log/auth.log", os.R_OK):
+            raw_fail = (
+                subprocess.check_output(
+                    "grep 'Failed password' /var/log/auth.log 2>/dev/null | wc -l",
+                    shell=True,
+                )
+                .decode()
+                .strip()
+            )
+            metrics["failed_login"] = (
+                f"[red]{raw_fail}[/red]"
+                if int(raw_fail or 0) > 0
+                else "[green]0[/green]"
+            )
+        else:
+            metrics["failed_login"] = "[dim]No Access[/dim]"
+    except Exception:
+        metrics["failed_login"] = "[dim]N/A[/dim]"
+    return metrics
+
+
+def get_update_status() -> Tuple[str, bool]:
+    reboot = os.path.exists("/var/run/reboot-required")
+    try:
+        total = int(
+            subprocess.check_output(
+                "apt list --upgradable 2>/dev/null | grep -v 'Listing...' | wc -l",
+                shell=True,
+            )
+            .decode()
+            .strip()
+        )
+        security = int(
+            subprocess.check_output(
+                "apt list --upgradable 2>/dev/null | grep -i security | wc -l",
+                shell=True,
+            )
+            .decode()
+            .strip()
+        )
+        return f"{total} total ({security} security)", reboot
+    except Exception:
+        return "[dim]Unknown[/dim]", reboot
+
+
+def render_dashboard():
+    # 1. Header & Timing Info
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    boot_time = datetime.datetime.fromtimestamp(psutil.boot_time())
+    uptime_delta = datetime.datetime.now() - boot_time
+    # Format uptime to Days, HH:MM:SS
+    uptime_str = str(uptime_delta).split(".")[0]
+
+    try:
+        l1, l5, l15 = psutil.getloadavg()
+    except Exception:
+        l1, l5, l15 = 0.0, 0.0, 0.0
+
+    active_users: Set[str] = {u.name for u in psutil.users()}
+    user_names = ", ".join(active_users) if active_users else "None"
+
+    # 2. Top Resource Table (CPU, RAM, DISK)
+    stats_table = Table(
+        show_header=False, box=None, padding=(0, 2), width=DASHBOARD_WIDTH - 6
+    )
+    stats_table.add_row(
+        "CPU",
+        create_bar(psutil.cpu_percent()),
+        f"{psutil.cpu_count()} Cores | Load: {l1:.2f}, {l5:.2f}, {l15:.2f}",
+    )
+
+    mem = psutil.virtual_memory()
+    stats_table.add_row(
+        "RAM",
+        create_bar(mem.percent),
+        f"{mem.used // 1024**2} / {mem.total // 1024**2} MB",
+    )
+
+    disk = psutil.disk_usage("/")
+    stats_table.add_row(
+        "DISK", create_bar(disk.percent), f"{disk.free // 1024**3} GB Free"
+    )
+
+    # 3. Middle Section: Host Info (with requested blank rows)
+    host_text = Text(get_host_info(), style="bold yellow")
+
+    # 4. Lower Diagnostic Grid (Processes | Health)
+    lower_grid = Table(
+        show_header=False, box=None, padding=0, expand=True, width=DASHBOARD_WIDTH - 6
+    )
+    lower_grid.add_column(ratio=1)
+    lower_grid.add_column(ratio=1)
+
+    # Left Side: Top Processes
+    proc_table = Table(
+        title="[bold underline]Top Processes[/bold underline]",
+        title_justify="left",
+        show_header=True,
+        header_style="bold magenta",
+        box=None,
+    )
+    proc_table.add_column("PID", style="dim")
+    proc_table.add_column("Name")
+    proc_table.add_column("%", justify="right")
+
+    for p in get_top_processes(5):
+        proc_table.add_row(
+            str(p.get("pid", "??")),
+            (p.get("name") or "??")[:15],
+            f"{int(p.get('cpu_percent') or 0)}%",
+        )
+
+    # Right Side: Health Checks
+    health = get_health_metrics()
+    health_table = Table(
+        title="[bold underline]Health & Network[/bold underline]",
+        title_justify="left",
+        show_header=False,
+        box=None,
+    )
+    health_table.add_row(f"Primary IP:    {get_ip_address()}")
+    health_table.add_row(f"Systemd:       {get_failed_services()}")
+    health_table.add_row(f"Boot Errors:   {health['boot']}")
+    health_table.add_row(f"Kernel Health: {health['kernel']}")
+    health_table.add_row(f"Failed Logins: {health['failed_login']}")
+    health_table.add_row(f"Docker:        {get_docker_stats()}")
+
+    lower_grid.add_row(proc_table, health_table)
+
+    # 5. Main Container Assembly
+    main_container = Table(
+        show_header=False, box=None, padding=0, width=DASHBOARD_WIDTH - 4
+    )
+    main_container.add_row(stats_table)
+    main_container.add_row("")  # Blank row before Host Info
+    main_container.add_row(host_text)  # Host: KVM/QEMU...
+    main_container.add_row("")  # Blank row after Host Info
+    main_container.add_row(lower_grid)
+
+    # 6. Final Footer Logic
+    updates_str, reboot_needed = get_update_status()
+    reboot_tag = "[bold red]YES[/bold red]" if reboot_needed else "[green]No[/green]"
+
+    header = Text.assemble(
+        (" SYSTEM DIAGNOSTICS ", "bold white on blue"),
+        (f"  {now}  Uptime: {uptime_str}", "dim"),
+    )
+    footer = (
+        f"[bold]Users ({len(active_users)}):[/bold] {user_names}\n"
+        f"[bold]Updates:[/bold] {updates_str}  |  [bold]Reboot Required:[/bold] {reboot_tag}"
+    )
+
+    # 7. Print the Panel
+    console.print(
+        Panel(
+            main_container,
+            title=header,
+            title_align="left",
+            subtitle=footer,
+            subtitle_align="left",
+            border_style="blue",
+            width=DASHBOARD_WIDTH,
+        )
+    )
+
+
+if __name__ == "__main__":
+    render_dashboard()

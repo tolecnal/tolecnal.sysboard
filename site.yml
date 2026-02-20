@@ -1,0 +1,14 @@
+---
+- name: Deploy System Diagnostics Dashboard
+  hosts: all
+  become: true
+  gather_facts: true
+
+  # Variables can be overridden here or in host_vars/group_vars
+  vars:
+    system_dashboard_width: 88
+    system_dashboard_purge_motd_scripts: true
+
+  roles:
+    - role: tolecnal.sysboard
+

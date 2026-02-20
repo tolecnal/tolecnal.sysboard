@@ -1,0 +1,30 @@
+---
+galaxy_info:
+  author: tolecnal
+  description: A homebrew, minimalist alternative to fastfetch for server diagnostics on SSH login.
+  company: ""
+
+  # Licenses like MIT, BSD, or GPLv2 are standard.
+  license: MIT
+
+  min_ansible_version: "2.14"
+
+  # Platforms help Ansible Lint and Galaxy categorize your role.
+  platforms:
+    - name: Debian
+      versions:
+        - all
+    - name: Ubuntu
+      versions:
+        - all
+
+  galaxy_tags:
+    - dashboard
+    - diagnostics
+    - monitoring
+    - motd
+    - ssh
+
+# List your role dependencies here. Our role is standalone.
+dependencies: []
+

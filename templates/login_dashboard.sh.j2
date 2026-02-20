@@ -1,0 +1,13 @@
+#!/bin/sh
+# Check if the shell is interactive
+if [ -t 0 ]; then
+    # SHLVL 1 = Primary login shell
+    # We also check that we aren't inside a sudo session (SUDO_USER is empty)
+    if [ "$SHLVL" -eq 1 ] && [ -z "$SUDO_USER" ]; then
+        # Ensure the python script exists before calling
+        if [ -x /usr/local/bin/system_stats.py ]; then
+            /usr/local/bin/system_stats.py
+        fi
+    fi
+fi
+

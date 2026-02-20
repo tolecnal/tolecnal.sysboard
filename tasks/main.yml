@@ -1,0 +1,95 @@
+---
+- name: Install system dependencies for the dashboard
+  ansible.builtin.apt:
+    name:
+      - python3-psutil
+      - python3-rich
+      - curl
+      - sed
+    state: present
+    update_cache: true
+  tags: [dashboard, install]
+
+- name: Deploy the Python Dashboard Script
+  ansible.builtin.template:
+    src: system_stats.j2
+    dest: /usr/local/bin/system_stats.py
+    mode: '0755'
+    owner: root
+    group: root
+  tags: [dashboard, script]
+
+- name: Deploy the profile.d shell hook (Bash/Zsh compatibility)
+  ansible.builtin.template:
+    src: login_dashboard.sh.j2
+    dest: /etc/profile.d/login_dashboard.sh
+    mode: '0644'
+    owner: root
+    group: root
+  tags: [dashboard, hook]
+
+- name: Ensure Zsh sources profile.d on login
+  ansible.builtin.blockinfile:
+    path: /etc/zsh/zprofile
+    create: true
+    owner: root
+    group: root
+    mode: '0644'
+    marker: "# {mark} ANSIBLE MANAGED BLOCK: Source profile.d"
+    block: |
+      if [ -d /etc/profile.d ]; then
+        for i in /etc/profile.d/*.sh; do
+          if [ -r "$i" ]; then
+            . "$i"
+          fi
+        done
+      fi
+  when: ansible_facts['os_family'] == "Debian"
+  tags: [dashboard, zsh]
+
+- name: Disable default SSH MOTD printing
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^#?PrintMotd'
+    line: 'PrintMotd no'
+    validate: '/usr/sbin/sshd -t -f %s'
+  notify: Restart SSH
+  when: system_dashboard_disable_default_motd | default(true)
+  tags: [dashboard, ssh]
+
+- name: Silence static MOTD file
+  ansible.builtin.copy:
+    content: ""
+    dest: /etc/motd
+    owner: root
+    group: root
+    mode: '0644'
+  when: system_dashboard_disable_default_motd | default(true)
+  tags: [dashboard, cleanup]
+
+- name: Purge default Ubuntu/Debian MOTD dynamic scripts
+  ansible.builtin.file:
+    path: "/etc/update-motd.d/{{ item }}"
+    state: absent
+  loop:
+    - 00-header
+    - 10-help-text
+    - 50-motd-news
+    - 80-livepatch
+    - 90-updates-available
+    - 91-release-upgrade
+    - 95-hwe-eol
+    - 98-reboot-required
+  when: system_dashboard_purge_motd_scripts | default(true)
+  tags: [dashboard, cleanup]
+
+- name: Remove Ubuntu-specific legal and systeminfo scripts
+  ansible.builtin.file:
+    path: "/etc/update-motd.d/{{ item }}"
+    state: absent
+  loop:
+    - 50-landscape-sysinfo
+    - 51-cloudguest
+  when: system_dashboard_purge_motd_scripts | default(true)
+  tags: [dashboard, cleanup]
+

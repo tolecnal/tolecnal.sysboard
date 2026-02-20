@@ -1,0 +1,11 @@
+---
+# Control whether to silence the standard MOTD system
+system_dashboard_disable_default_motd: true
+
+# Control whether to remove specific Debian/Ubuntu login files
+system_dashboard_purge_motd_scripts: true
+
+# The dashboard width
+system_dashboard_width: 90
+
+system_dashboard_configure_zsh: true
