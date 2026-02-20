@@ -14,11 +14,11 @@ A homebrew, minimalist alternative to tools like `fastfetch` or `neofetch`, spec
 
 ## 🛠 Role Variables (defaults/main.yml)
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `system_dashboard_width` | `90` | Fixed terminal width for the dashboard. |
-| `system_dashboard_disable_default_motd` | `true` | Silences standard SSH/Static MOTD. |
-| `system_dashboard_purge_motd_scripts` | `true` | Removes default Ubuntu/Debian help/news scripts. |
+| Variable                                | Default | Description                                      |
+| --------------------------------------- | ------- | ------------------------------------------------ |
+| `system_dashboard_width`                | `90`    | Fixed terminal width for the dashboard.          |
+| `system_dashboard_disable_default_motd` | `true`  | Silences standard SSH/Static MOTD.               |
+| `system_dashboard_purge_motd_scripts`   | `true`  | Removes default Ubuntu/Debian help/news scripts. |
 
 ## 📦 Usage
 
@@ -41,5 +41,7 @@ The dashboard triggers automatically on login. You can also run it manually at a
 
 ## ⚠️ Requirements
 
-Python: python3-psutil, python3-rich (installed by the role).
-Permissions: For full data, ensure your user is in the adm group (for logs) and docker group (for container stats).
+- Python
+  - python3-psutil, python3-rich (installed by the role).
+- Permissions
+  - For full data, ensure your user is in the adm group (for logs) and docker group (for container stats).
