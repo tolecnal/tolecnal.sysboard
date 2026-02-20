@@ -25,8 +25,11 @@ A homebrew, minimalist alternative to tools like `fastfetch` or `neofetch`, spec
 Add the role to your playbook:
 
 ```yaml
-- hosts: all
+- name: Setup tolecnal.sysboard
+  hosts: all
   become: true
+  gather_facts: true
+
   roles:
     - role: tolecnal.sysboard
 ```
